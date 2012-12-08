@@ -24,7 +24,7 @@ DROP TABLE IF EXISTS tage;
 CREATE TABLE tage (
 	datum DATE NOT NULL PRIMARY KEY,
 	wochentag TINYINT,
-	typ ENUM('mo-fr', 'sa', 'so&feiertag')
+	typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag')
 );""")
 
 day = date(2002, 1, 1)
@@ -84,21 +84,19 @@ print("""
 DROP TABLE IF EXISTS nast_monatsdtv;
 
 CREATE TABLE nast_monatsdtv (
-	datum DATE NOT NULL,
+	jahr INT NOT NULL,
+	monat INT NOT NULL,
 	stelle_id TINYINT,
-	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag'),
+	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag'),
 	dtv INT,
-	PRIMARY KEY (datum, stelle_id, tag_typ)
+	PRIMARY KEY (jahr, monat, stelle_id, tag_typ)
 );""")
 
 data = pickle.load(open('monatsdaten.pickle', 'rb'))
 for d in data:
 	datum = date(d['jahr'], d['monat'], 1)
-	print("INSERT INTO nast_monatsdtv VALUES ('%s', %d, %d, %d);"
-	       % (datum, d['stelle'],d['tag_typ']+1, d['dtv']))
-
-#print('UPDATE nast_monatsdtv SET datum=CONCAT('2012-', MONTH(datum)+5, '-1') WHERE stelle_id = 9 AND YEAR(datum)=2012;');
-
+	print("INSERT INTO nast_monatsdtv VALUES (%d, %d, %d, %d, %d);"
+	       % (d['jahr'], d['monat'], d['stelle'],d['tag_typ']+1, d['dtv']))
 
 print("""
 
@@ -126,26 +124,8 @@ INSERT INTO nast_zaehlstellen VALUES
 
 --- Nützliche Views und Tables
 
-DROP TABLE IF EXISTS nast_monatsvergleich;
-CREATE TABLE nast_monatsvergleich AS
-SELECT a.*, b.dtv AS dtv_vorjahr, c.dtv AS dtv_2002
-FROM
-	nast_monatsdtv a
-	-- vorjahreswert
-	LEFT OUTER JOIN nast_monatsdtv b
-		ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND MONTH(a.datum)=MONTH(b.datum) AND YEAR(a.datum)-1=YEAR(b.datum)
-	-- wert 2002
-	LEFT OUTER JOIN nast_monatsdtv c
-		ON a.stelle_id=c.stelle_id AND a.tag_typ=c.tag_typ AND MONTH(a.datum)=MONTH(c.datum) AND YEAR(c.datum)=2002;
-
--- Erhöhe Zähldaten für Opernring Innen um die für Außen.
-UPDATE
-	nast_monatsvergleich a
-	INNER JOIN nast_monatsvergleich b ON a.datum=b.datum AND a.tag_typ=b.tag_typ
-SET
-	a.dtv=a.dtv+b.dtv
-WHERE a.stelle_id=2 AND b.stelle_id=8 AND YEAR(a.datum)=2012;
-
+UPDATE nast_monatsdtv SET tag_typ=4 WHERE jahr<=2010 AND tag_typ=1;
+DELETE FROM nast_monatsdtv WHERE jahr<=2010 AND tag_typ=2;
 
 CREATE OR REPLACE VIEW tage_typpromonat AS
 SELECT year(datum) AS jahr, month(datum) AS monat,
@@ -155,55 +135,86 @@ SELECT year(datum) AS jahr, month(datum) AS monat,
 	COUNT(1) AS gesamt
 FROM tage GROUP BY jahr, monat;
 
--- Bis 2010 wurden Samstage als Wochentage gezählt (jetzt in der Kategorie Mo-Fr). Korrektur für den Jahresvergleich
+CREATE OR REPLACE VIEW tage_tagepromonatundtyp AS
+SELECT year(datum) AS jahr, month(datum) AS monat, typ, count(datum) AS tage FROM tage GROUP BY typ, jahr, monat
+UNION
+SELECT year(datum) AS jahr, month(datum) AS monat, 'werktag' AS typ, count(datum) AS tage FROM tage WHERE typ IN(1,2) GROUP BY jahr, monat;
+
+INSERT INTO nast_monatsdtv (jahr, monat, stelle_id, tag_typ, dtv)
+SELECT d.jahr, d.monat, d.stelle_id, 4, round(sum(d.dtv*t.tage)/sum(t.tage))
+FROM nast_monatsdtv d
+INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
+WHERE d.jahr>=2011 AND d.tag_typ IN(1,2) GROUP BY d.jahr, d.monat, d.stelle_id;
+
+DROP TABLE IF EXISTS nast_monatsvergleich;
+CREATE TABLE nast_monatsvergleich (
+	jahr INT NOT NULL,
+	monat INT NOT NULL,
+	stelle_id TINYINT,
+	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag'),
+	dtv INT,
+	dtv_vorjahr INT,
+	dtv_2002 INT,
+	PRIMARY KEY (jahr, monat, stelle_id, tag_typ)
+);
+INSERT INTO nast_monatsvergleich
+SELECT a.*, b.dtv AS dtv_vorjahr, c.dtv AS dtv_2002
+FROM
+	nast_monatsdtv a
+	-- vorjahreswert
+	LEFT OUTER JOIN nast_monatsdtv b
+		ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND a.jahr-1=b.jahr
+	-- wert 2002
+	LEFT OUTER JOIN nast_monatsdtv c
+		ON a.stelle_id=c.stelle_id AND a.tag_typ=c.tag_typ AND a.monat=c.monat AND c.jahr=2002;
+
+-- Erhöhe Zähldaten für Opernring Innen um die für Außen.
 UPDATE
-	nast_monatsvergleich v
-	INNER JOIN tage_typpromonat t ON t.jahr=YEAR(v.datum) AND t.monat=MONTH(v.datum)
-	INNER JOIN nast_monatsvergleich sa ON v.stelle_id=sa.stelle_id AND v.datum=sa.datum AND v.tag_typ=1 AND sa.tag_typ=2
+	nast_monatsvergleich a
+	INNER JOIN nast_monatsvergleich b ON a.jahr=b.jahr AND a.monat=b.monat AND a.tag_typ=b.tag_typ
 SET
-	v.dtv = (v.dtv*t.mo_fr+sa.dtv*t.sa)/(t.mo_fr+t.sa)
-WHERE t.jahr=2011;
+	a.dtv=a.dtv+b.dtv
+WHERE a.stelle_id=2 AND b.stelle_id=8 AND a.jahr=2012;
+
 
 CREATE OR REPLACE VIEW nast_monatsentwicklung AS
 SELECT
-	stelle_id, datum, tag_typ, (dtv/dtv_vorjahr-1)*100 AS dtv_zum_vorjahr, (dtv/dtv_2002-1)*100 AS dtv_zu_2002
+	stelle_id, jahr, monat, tag_typ, (dtv/dtv_vorjahr-1)*100 AS dtv_zum_vorjahr, (dtv/dtv_2002-1)*100 AS dtv_zu_2002
 FROM
 	nast_monatsvergleich;
 
 -- Quartalszahlen
 CREATE OR REPLACE VIEW nast_quartalsdtv AS
-SELECT
-	year(datum) AS jahr, MONTH(datum) DIV 4 + 1 AS quartal, stelle_id, typ as tag_typ, SUM(dtv_summe)/COUNT(dtv_summe) AS dtv
-FROM
-	nast_tagesdtv d
-	INNER JOIN tage t USING(datum)
-GROUP BY jahr, quartal, stelle_id, tag_typ;
+SELECT d.jahr, d.monat DIV 4 + 1 AS quartal, d.stelle_id, d.tag_typ, sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag
+FROM nast_monatsdtv d INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
+GROUP BY d.jahr, quartal, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_quartalsvergleich AS
-SELECT a.*, b.dtv AS dtv_vorjahr
-FROM
-	nast_quartalsdtv a
-	-- vorjahreswert
-	LEFT OUTER JOIN nast_quartalsdtv b
-		ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.quartal=b.quartal AND a.jahr-1=b.jahr;
+SELECT d.jahr, d.monat DIV 4 + 1 AS quartal, d.stelle_id, d.tag_typ, sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv_vorjahr)/count(d.dtv_vorjahr) AS dtv_monat_vorjahr, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_vorjahr*u.tage)/sum(u.tage) AS dtv_tag_vorjahr
+FROM nast_monatsvergleich d
+INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
+INNER JOIN tage_tagepromonatundtyp u ON d.jahr-1=u.jahr AND d.monat=u.monat AND d.tag_typ=u.typ
+GROUP BY d.jahr, quartal, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_quartalsentwicklung AS
-SELECT
-	stelle_id, jahr, quartal, tag_typ, (dtv/dtv_vorjahr-1)*100 AS dtv_zum_vorjahr
-FROM
-	nast_quartalsvergleich;
+SELECT stelle_id, jahr, quartal, tag_typ, (dtv_monat/dtv_monat_vorjahr-1)*100 AS dtv_rel_monat_vorjahr, (dtv_tag/dtv_tag_vorjahr-1)*100 AS dtv_rel_tag_vorjahr
+FROM nast_quartalsvergleich;
 
 -- Jahresdaten
 CREATE OR REPLACE VIEW nast_jahresdtv AS
-SELECT
-	year(datum) AS jahr, stelle_id, typ as tag_typ, SUM(dtv_summe)/COUNT(dtv_summe) AS dtv
-FROM
-	nast_tagesdtv d
-	INNER JOIN tage t USING(datum)
-GROUP BY jahr, stelle_id, tag_typ;
+SELECT d.jahr, d.stelle_id, d.tag_typ, sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag
+FROM nast_monatsdtv d INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
+GROUP BY d.jahr, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_jahresvergleich AS
-SELECT a.*, b.dtv AS dtv_vorjahr
+SELECT d.jahr, d.stelle_id, d.tag_typ, sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv_vorjahr)/count(d.dtv_vorjahr) AS dtv_monat_vorjahr, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_vorjahr*u.tage)/sum(u.tage) AS dtv_tag_vorjahr
+FROM nast_monatsvergleich d
+INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
+INNER JOIN tage_tagepromonatundtyp u ON d.jahr-1=u.jahr AND d.monat=u.monat AND d.tag_typ=u.typ
+GROUP BY d.jahr, d.tag_typ, d.stelle_id;
+
+CREATE OR REPLACE VIEW nast_jahresvergleich AS
+SELECT a.*, b.dtv_monat AS dtv_monat_vorjahr, b.dtv_tag AS dtv_tag_vorjahr
 FROM
 	nast_jahresdtv a
 	-- vorjahreswert
@@ -212,10 +223,8 @@ FROM
 
 
 CREATE OR REPLACE VIEW nast_jahresentwicklung AS
-SELECT
-	stelle_id, jahr, tag_typ, (dtv/dtv_vorjahr-1)*100 AS dtv_zum_vorjahr
-FROM
-	nast_jahresvergleich;
+SELECT stelle_id, jahr, tag_typ, (dtv_monat/dtv_monat_vorjahr-1)*100 AS dtv_rel_monat_vorjahr, (dtv_tag/dtv_tag_vorjahr-1)*100 AS dtv_rel_tag_vorjahr
+FROM nast_jahresvergleich;
 	
 
 """)
