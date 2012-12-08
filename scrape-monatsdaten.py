@@ -25,12 +25,10 @@ class Extractor:
 			values = [x['values'] for x in data['elements'] if 'values' in x]
 			for jahr, dtv_months in zip(range(2002,2013), values):
 				for monat, dtv in zip(range(1,13), dtv_months):
-					if stelle == 9 and jahr == 2012:
-						monat += 5
 					dataset.append({
 						'stelle':  page['stelle'],
 						'jahr':    jahr,
-						'monat':   monat,
+						'monat':   monat+5 if page['stelle'] == 9 and jahr == 2012 else monat,
 						'tag_typ': typ,
 						'dtv':     dtv,
 					})
