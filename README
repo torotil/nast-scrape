@@ -1,0 +1,37 @@
+=== Voraussetzungen ===
+
+Python 3
+
+
+=== Benutzung ===
+
+1. Daten mit scrape-monatsdaten.py und scrape-tagesdaten.py von nast.at herunterladen
+2. Daten mit csv-*.py oder dbdump.py in ein Bearbeitbares Format bringen, oder direkt mit den Pickle-Files weiterarbeiten.
+
+
+=== Die Daten ===
+
+Dieses Paket stellt nur die Tools zum extrahieren der auf http://nast.at veröffentlichten Daten - nicht jedoch die Daten selbst - zur Verfügung!
+
+Folgende Daten werden derzeit extrahiert:
+ - Zählwerte pro Tag und Zählstelle für 2011 und 2012 (Gesamt und je Richtung)
+ - Niederschlags und Temperaturwerte für 2011 und 2012
+ - Zählwerte pro Monat und Zählstelle (nur Gesamt)
+
+Zusätzlich errechnet die mitgelieferte Bibliothek alle Feiertage für Wien.
+
+Folgende Korrekturen wurden an Daten vorgenommen:
+ - Die Monatsdaten für Margaritensteg sind auf nast.at um 5 Monate verschoben (Beginn der Messung mit Juni; auf nast.at sind sie ab Jänner gelistet).
+
+ 
+=== File-Struktur ===
+
+	- abfragen.sql           - Nützliche Abfragen für die mit der dbdump.py erzeugte Datenbankstruktur
+	- csv-monatsdaten.py     - Erzeugt ein CSV-File mit den Monatsdaten von nast (scrape-monatsdaten.py)
+	- csv-tagesdaten.py      - Das gleiche für Tagesdaten
+	- dbdump.py              - Erzeugt ein für MySQL geeignetes SQL-File mit allen Daten und einigen nützlichen Views
+	- feiertage.py           - Bibliothek zum Errechnen der Feiertage in Wien
+	- README                 - Diese Datei
+	- scrape-monatsdaten.py  - Lade Monatsdaten für alle Zählstellen (soweit vorhanden) von nast.at und speichere sie in monatsdaten.pickle
+	- scrape-monatsdaten.py  - Das selbe für Tagesdaten
+	- scrape.py              - Bibliothek für das scrapen oder Daten von nast.at
