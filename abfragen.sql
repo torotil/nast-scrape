@@ -31,34 +31,19 @@ FROM
 	nast_monatsentwicklung e
 	INNER JOIN nast_zaehlstellen s ON s.id=e.stelle_id
 WHERE
-	year(datum)=2012 AND month(datum)=10 AND tag_typ=1;
+	jahr=2012 AND monat=10 AND tag_typ=1;
 
 -- Kontrolle: aktueller Quartalsvergleich
-SELECT
-	tag_typ, sum(dtv_zum_vorjahr)/count(dtv_zum_vorjahr)
-FROM
-	nast_quartalsentwicklung
-WHERE
-	jahr=2012 AND quartal=3 GROUP BY tag_typ;
+SELECT basis, jahr, quartal, tag_typ, sum(dtv_rel_monat)/count(dtv_rel_monat) AS rel_monat, sum(dtv_rel_tag)/count(dtv_rel_tag) AS rel_tag
+FROM nast_quartalsentwicklung
+GROUP BY basis, jahr, quartal, tag_typ
+ORDER BY basis, jahr, quartal, tag_typ;
 
--- Entwicklung laufendes Jahr bis …:
-SELECT tag_typ, sum(entwicklung)/count(entwicklung) FROM
-	(SELECT stelle_id, tag_typ, (d2012.dtv/d2011.dtv-1)*100 AS entwicklung FROM
-		(SELECT year(datum) AS jahr, stelle_id, typ as tag_typ, SUM(dtv_summe)/COUNT(dtv_summe) AS dtv FROM nast_tagesdtv d INNER JOIN tage t USING(datum) WHERE year(datum)=2011 AND month(datum)<=10 AND stelle_id <= 7 GROUP BY jahr, stelle_id, tag_typ) d2011
-		INNER JOIN
-		(SELECT year(datum) AS jahr, stelle_id, typ as tag_typ, SUM(dtv_summe)/COUNT(dtv_summe) AS dtv FROM nast_tagesdtv d INNER JOIN tage t USING(datum) WHERE year(datum)=2012 AND month(datum)<=10 AND stelle_id <= 7 GROUP BY jahr, stelle_id, tag_typ) d2012
-		USING (stelle_id, tag_typ)
-	) e
-GROUP BY tag_typ;
-
--- Schätzung Jahresentwicklung 2010 -> 2011
-SELECT tag_typ, sum(dtv_zum_vorjahr)/count(dtv_zum_vorjahr) AS entwicklung
-FROM (
-	SELECT MONTH(datum) AS monat, tag_typ, dtv_zum_vorjahr
-	FROM nast_monatsentwicklung
-	WHERE year(datum)=2011 AND tag_typ IN (1,3)
-	GROUP BY monat, tag_typ) a
-GROUP BY tag_typ;
+-- Schätzung Jahresentwicklung. (Stimmt auch für Jahre, bei denen Daten zu einzelnen Monaten fehlen - insbesondere das aktuelle Jahr)
+SELECT basis, jahr, tag_typ, sum(dtv_rel_monat)/count(dtv_rel_monat), sum(dtv_rel_tag)/count(dtv_rel_tag)
+FROM nast_jahresentwicklung
+GROUP BY basis, jahr, tag_typ
+ORDER BY basis, jahr, tag_typ;
 
 --- CSV-Export
 -- mysql -u root -p nast -B -e "select year(datum) as jahr, month(datum) as monat, day(datum) as tag, stelle_id, dtv_r1, dtv_r2, dtv_summe, typ as tag_typ, wochentag, nast_witterung.* from nast_tagesdtv inner join nast_witterung using(datum) inner join tage using(datum);" | sed 's/\t/","/g;s/^/"/;s/$/"/;s/\n//g' > nast-daten.csv

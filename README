@@ -22,8 +22,8 @@ Zusätzlich errechnet die mitgelieferte Bibliothek alle Feiertage für Wien.
 
 Folgende Korrekturen wurden an Daten vorgenommen:
  - Die Monatsdaten für Margaritensteg sind auf nast.at um 5 Monate verschoben (Beginn der Messung mit Juni; auf nast.at sind sie ab Jänner gelistet).
+ - Für die Vergleiche mit früheren Jahren werden beim Opernring für 2012 die Zählungen beider Zählstellen zusammengezählt. (nur in dbdump.py)
 
- 
 === File-Struktur ===
 
 	- abfragen.sql           - Nützliche Abfragen für die mit der dbdump.py erzeugte Datenbankstruktur

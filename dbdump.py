@@ -148,30 +148,25 @@ WHERE d.jahr>=2011 AND d.tag_typ IN(1,2) GROUP BY d.jahr, d.monat, d.stelle_id;
 
 DROP TABLE IF EXISTS nast_monatsvergleich;
 CREATE TABLE nast_monatsvergleich (
+	basis VARCHAR(32),
 	jahr INT NOT NULL,
 	monat INT NOT NULL,
 	stelle_id TINYINT,
 	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag'),
 	dtv INT,
-	dtv_vorjahr INT,
-	dtv_2002 INT,
-	PRIMARY KEY (jahr, monat, stelle_id, tag_typ)
+	dtv_basis INT,
+	PRIMARY KEY (basis, jahr, monat, stelle_id, tag_typ)
 );
 INSERT INTO nast_monatsvergleich
-SELECT a.*, b.dtv AS dtv_vorjahr, c.dtv AS dtv_2002
-FROM
-	nast_monatsdtv a
-	-- vorjahreswert
-	LEFT OUTER JOIN nast_monatsdtv b
-		ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND a.jahr-1=b.jahr
-	-- wert 2002
-	LEFT OUTER JOIN nast_monatsdtv c
-		ON a.stelle_id=c.stelle_id AND a.tag_typ=c.tag_typ AND a.monat=c.monat AND c.jahr=2002;
+SELECT 'vorjahr' AS basis, a.*, b.dtv AS dtv_basis FROM nast_monatsdtv a INNER JOIN nast_monatsdtv b ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND a.jahr-1=b.jahr
+UNION
+SELECT '2002' AS basis, a.*, b.dtv AS dtv_basis FROM nast_monatsdtv a INNER JOIN nast_monatsdtv b ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND b.jahr=2002
+;
 
 -- Erhöhe Zähldaten für Opernring Innen um die für Außen.
 UPDATE
 	nast_monatsvergleich a
-	INNER JOIN nast_monatsvergleich b ON a.jahr=b.jahr AND a.monat=b.monat AND a.tag_typ=b.tag_typ
+	INNER JOIN nast_monatsdtv b ON a.jahr=b.jahr AND a.monat=b.monat AND a.tag_typ=b.tag_typ
 SET
 	a.dtv=a.dtv+b.dtv
 WHERE a.stelle_id=2 AND b.stelle_id=8 AND a.jahr=2012;
@@ -179,7 +174,7 @@ WHERE a.stelle_id=2 AND b.stelle_id=8 AND a.jahr=2012;
 
 CREATE OR REPLACE VIEW nast_monatsentwicklung AS
 SELECT
-	stelle_id, jahr, monat, tag_typ, (dtv/dtv_vorjahr-1)*100 AS dtv_zum_vorjahr, (dtv/dtv_2002-1)*100 AS dtv_zu_2002
+	basis, stelle_id, jahr, monat, tag_typ, (dtv/dtv_basis-1)*100 AS dtv_rel
 FROM
 	nast_monatsvergleich;
 
@@ -190,14 +185,15 @@ FROM nast_monatsdtv d INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND 
 GROUP BY d.jahr, quartal, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_quartalsvergleich AS
-SELECT d.jahr, d.monat DIV 4 + 1 AS quartal, d.stelle_id, d.tag_typ, sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv_vorjahr)/count(d.dtv_vorjahr) AS dtv_monat_vorjahr, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_vorjahr*u.tage)/sum(u.tage) AS dtv_tag_vorjahr
+SELECT d.basis, d.jahr, d.monat DIV 4 + 1 AS quartal, d.stelle_id, d.tag_typ, sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv_basis)/count(d.dtv_basis) AS dtv_monat_basis, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_basis*u.tage)/sum(u.tage) AS dtv_tag_basis
 FROM nast_monatsvergleich d
 INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
 INNER JOIN tage_tagepromonatundtyp u ON d.jahr-1=u.jahr AND d.monat=u.monat AND d.tag_typ=u.typ
-GROUP BY d.jahr, quartal, d.tag_typ, d.stelle_id;
+WHERE d.basis='vorjahr'
+GROUP BY d.basis, d.jahr, quartal, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_quartalsentwicklung AS
-SELECT stelle_id, jahr, quartal, tag_typ, (dtv_monat/dtv_monat_vorjahr-1)*100 AS dtv_rel_monat_vorjahr, (dtv_tag/dtv_tag_vorjahr-1)*100 AS dtv_rel_tag_vorjahr
+SELECT basis, stelle_id, jahr, quartal, tag_typ, (dtv_monat/dtv_monat_basis-1)*100 AS dtv_rel_monat, (dtv_tag/dtv_tag_basis-1)*100 AS dtv_rel_tag
 FROM nast_quartalsvergleich;
 
 -- Jahresdaten
@@ -207,23 +203,26 @@ FROM nast_monatsdtv d INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND 
 GROUP BY d.jahr, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_jahresvergleich AS
-SELECT d.jahr, d.stelle_id, d.tag_typ, sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv_vorjahr)/count(d.dtv_vorjahr) AS dtv_monat_vorjahr, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_vorjahr*u.tage)/sum(u.tage) AS dtv_tag_vorjahr
+SELECT d.basis, d.jahr, d.stelle_id, d.tag_typ,
+  sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv_basis)/count(d.dtv_basis) AS dtv_monat_basis,
+  sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_basis*u.tage)/sum(u.tage) AS dtv_tag_basis
 FROM nast_monatsvergleich d
 INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
 INNER JOIN tage_tagepromonatundtyp u ON d.jahr-1=u.jahr AND d.monat=u.monat AND d.tag_typ=u.typ
-GROUP BY d.jahr, d.tag_typ, d.stelle_id;
-
-CREATE OR REPLACE VIEW nast_jahresvergleich AS
-SELECT a.*, b.dtv_monat AS dtv_monat_vorjahr, b.dtv_tag AS dtv_tag_vorjahr
-FROM
-	nast_jahresdtv a
-	-- vorjahreswert
-	LEFT OUTER JOIN nast_jahresdtv b
-		ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.jahr-1=b.jahr;
-
+WHERE d.basis='vorjahr'
+GROUP BY d.basis, d.jahr, d.tag_typ, d.stelle_id
+UNION
+SELECT d.basis, d.jahr, d.stelle_id, d.tag_typ,
+  sum(d.dtv)/count(d.dtv) AS dtv_monat, sum(d.dtv_basis)/count(d.dtv_basis) AS dtv_monat_basis,
+  sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_basis*u.tage)/sum(u.tage) AS dtv_tag_basis
+FROM nast_monatsvergleich d
+INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
+INNER JOIN tage_tagepromonatundtyp u ON u.jahr=2002 AND d.monat=u.monat AND d.tag_typ=u.typ
+WHERE d.basis='2002'
+GROUP BY d.basis, d.jahr, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_jahresentwicklung AS
-SELECT stelle_id, jahr, tag_typ, (dtv_monat/dtv_monat_vorjahr-1)*100 AS dtv_rel_monat_vorjahr, (dtv_tag/dtv_tag_vorjahr-1)*100 AS dtv_rel_tag_vorjahr
+SELECT basis, stelle_id, jahr, tag_typ, (dtv_monat/dtv_monat_basis-1)*100 AS dtv_rel_monat, (dtv_tag/dtv_tag_basis-1)*100 AS dtv_rel_tag
 FROM nast_jahresvergleich;
 	
 
