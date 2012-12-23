@@ -24,7 +24,7 @@ class Extractor:
 			data = json.loads(page['data'][typ])
 			values = [x['values'] for x in data['elements'] if 'values' in x]
 			for jahr, dtv_months in zip(range(2002,2013), values):
-				for monat, dtv in zip(range(1,13), dtv_months):
+				for monat, dtv in zip(range(1,13), dtv_months[:-1]):
 					dataset.append({
 						'stelle':  page['stelle'],
 						'jahr':    jahr,
