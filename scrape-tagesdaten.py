@@ -7,7 +7,7 @@ from scrape import TextResponseWrapper, NastHarvester, Itemizer, Storer, Consume
 
 class Harvester(NastHarvester):
 	def getPage(self, stelle, jahr, monat):
-		url    = '/charts/test_php/read_chart_from_DB.php?get_variable=%d-2-1-1-1-1-%d-%d' % (stelle, monat, jahr)
+		url    = '/charts/read_chart/data_monatsauswertung.php?zid=%d&monat=%d&jahr=%d&temp=2&niederschlag=1&summe=1&richtung=1&richtung=1&skala=1' % (stelle, monat, jahr)
 		data   = self.fetch(url).read()
 		#args   = { 'art': 'Monatsauswertung', 'a': stelle, 'b': 2, 'c' : 1, 'monat' : monat, 'jahr' : jahr }
 		#legend = self.fetch('/verkehrsdaten/Legende', args).read()
@@ -80,9 +80,9 @@ data  = []
 harvester = Harvester()
 extractor = Extractor()
 
-for stelle in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]:
+for stelle in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
 	for monat in range(1, 13):
-		for jahr in [2011, 2012]:
+		for jahr in [2011, 2012, 2013]:
 			datasets.put({'stelle': stelle, 'jahr': jahr, 'monat': monat})
 datasets.put(None)
 			

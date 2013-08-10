@@ -71,8 +71,8 @@ CREATE TABLE nast_witterung (
 	schnee DECIMAL(5,2),
 	temp_min DECIMAL(5,2),
 	temp_max DECIMAL(5,2),
-	temp_7 DECIMAL(5.2),
-	temp_19 DECIMAL(5.2)
+	temp_7 DECIMAL(5,2),
+	temp_19 DECIMAL(5,2)
 );
 
 INSERT INTO nast_witterung VALUES
@@ -89,13 +89,14 @@ CREATE TABLE nast_monatsdtv (
 	stelle_id TINYINT,
 	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag'),
 	dtv INT,
+	dtv_rel DECIMAL(8,5) DEFAULT NULL,
 	PRIMARY KEY (jahr, monat, stelle_id, tag_typ)
 );""")
 
 data = pickle.load(open('monatsdaten.pickle', 'rb'))
 for d in data:
 	datum = date(d['jahr'], d['monat'], 1)
-	print("INSERT INTO nast_monatsdtv VALUES (%d, %d, %d, %d, %d);"
+	print("INSERT INTO nast_monatsdtv VALUES (%d, %d, %d, %d, %d, NULL);"
 	       % (d['jahr'], d['monat'], d['stelle'],d['tag_typ']+1, d['dtv']))
 
 print("""
@@ -119,7 +120,9 @@ INSERT INTO nast_zaehlstellen VALUES
 (2, 'Opernring Innen',   'Parlament',     'Oper'),
 (8, 'Opernring Außen',   'Parlament',     'Oper'),
 (1, 'Wienzeile',         'Stadtauswärts', 'Zentrum'),
-(9, 'Margaritensteg',    'Richtung 1',    'Richtung 2');
+(9, 'Margaritensteg',    'Richtung 1',    'Richtung 2'),
+(11, 'Operngasse', 'Zentrum', 'Stadtauswärts'),
+(12, 'Praterstern', 'Stadtauswärts', 'Zentrum');
 
 
 --- Nützliche Views und Tables
@@ -155,28 +158,28 @@ CREATE TABLE nast_monatsvergleich (
 	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag'),
 	dtv INT,
 	dtv_basis INT,
+	dtv_rel DECIMAL(15, 10),
 	PRIMARY KEY (basis, jahr, monat, stelle_id, tag_typ)
 );
 INSERT INTO nast_monatsvergleich
-SELECT 'vorjahr' AS basis, a.*, b.dtv AS dtv_basis FROM nast_monatsdtv a INNER JOIN nast_monatsdtv b ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND a.jahr-1=b.jahr
+SELECT 'vorjahr' AS basis, a.jahr, a.monat, a.stelle_id, a.tag_typ, a.dtv, b.dtv AS dtv_basis, a.dtv/b.dtv-1 AS dtv_rel
+FROM nast_monatsdtv a INNER JOIN nast_monatsdtv b ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND a.jahr-1=b.jahr
 UNION
-SELECT '2002' AS basis, a.*, b.dtv AS dtv_basis FROM nast_monatsdtv a INNER JOIN nast_monatsdtv b ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND b.jahr=2002
-;
+SELECT '2011'    AS basis, a.jahr, a.monat, a.stelle_id, a.tag_typ, a.dtv, b.dtv AS dtv_basis, a.dtv/b.dtv-1 AS dtv_rel
+FROM nast_monatsdtv a INNER JOIN nast_monatsdtv b ON a.stelle_id=b.stelle_id AND a.tag_typ=b.tag_typ AND a.monat=b.monat AND b.jahr=2011;
 
 -- Erhöhe Zähldaten für Opernring Innen um die für Außen.
 UPDATE
 	nast_monatsvergleich a
 	INNER JOIN nast_monatsdtv b ON a.jahr=b.jahr AND a.monat=b.monat AND a.tag_typ=b.tag_typ
 SET
-	a.dtv=a.dtv+b.dtv
-WHERE a.stelle_id=2 AND b.stelle_id=8 AND a.jahr=2012;
-
+	a.dtv=a.dtv+b.dtv, a.dtv_rel = (a.dtv+b.dtv)/(a.dtv_basis)-1
+WHERE a.stelle_id=2 AND b.stelle_id=8 AND ((a.jahr=2012 AND a.basis='vorjahr') OR (a.jahr>=2012 AND a.basis='2011'));
 
 CREATE OR REPLACE VIEW nast_monatsentwicklung AS
-SELECT
-	basis, stelle_id, jahr, monat, tag_typ, (dtv/dtv_basis-1)*100 AS dtv_rel
-FROM
-	nast_monatsvergleich;
+SELECT basis, jahr, monat, tag_typ, avg(dtv_rel)*100 AS dtv_rel, 2*std(dtv_rel)/sqrt(count(dtv_rel))*100 AS twostdev
+FROM nast_monatsvergleich
+GROUP BY basis, jahr, monat, tag_typ;
 
 -- Quartalszahlen
 CREATE OR REPLACE VIEW nast_quartalsdtv AS
@@ -202,9 +205,9 @@ GROUP BY d.basis, d.jahr, quartal, d.tag_typ;
 
 -- Jahresdaten
 CREATE OR REPLACE VIEW nast_jahresdtv AS
-SELECT d.jahr, d.stelle_id, d.tag_typ, avg(d.dtv) AS dtv_monat, std(d.dtv)/sqrt(count(d.dtv)) as dtv_monat_2stddev, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag
+SELECT d.jahr, d.stelle_id, avg(d.dtv) AS dtv_monat, std(d.dtv)/sqrt(count(d.dtv)) as dtv_monat_2stddev, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag
 FROM nast_monatsdtv d INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
-GROUP BY d.jahr, d.tag_typ, d.stelle_id;
+GROUP BY d.jahr, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_jahresvergleich AS
 SELECT d.basis, d.jahr, d.stelle_id, d.tag_typ,
@@ -221,21 +224,31 @@ SELECT d.basis, d.jahr, d.stelle_id, d.tag_typ,
   sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag, sum(d.dtv_basis*u.tage)/sum(u.tage) AS dtv_tag_basis
 FROM nast_monatsvergleich d
 INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
-INNER JOIN tage_tagepromonatundtyp u ON u.jahr=2002 AND d.monat=u.monat AND d.tag_typ=u.typ
-WHERE d.basis='2002'
+INNER JOIN tage_tagepromonatundtyp u ON u.jahr=2011 AND d.monat=u.monat AND d.tag_typ=u.typ
+WHERE d.basis='2011'
 GROUP BY d.basis, d.jahr, d.tag_typ, d.stelle_id;
 
 CREATE OR REPLACE VIEW nast_jahresentwicklung AS
 SELECT d.basis, d.jahr, d.tag_typ,
-	avg(d.dtv/d.dtv_basis) AS dtv_rel, std(d.dtv/d.dtv_basis)/sqrt(count(d.dtv)) as dtv_rel_2stddev
+	avg(d.dtv_rel)*100 AS dtv_rel, std(d.dtv_rel)/sqrt(count(d.dtv_rel))*100 as dtv_rel_2stddev
 FROM nast_monatsvergleich d
-WHERE d.basis='vorjahr'
-GROUP BY d.basis, d.jahr, d.tag_typ
-UNION
-SELECT d.basis, d.jahr, d.tag_typ,
-	avg(d.dtv/d.dtv_basis) AS dtv_rel, std(d.dtv/d.dtv_basis)/sqrt(count(d.dtv)) as dtv_rel_2stddev
-FROM nast_monatsvergleich d
-WHERE d.basis='2002'
 GROUP BY d.basis, d.jahr, d.tag_typ;
+
+CREATE OR REPLACE VIEW nast_jahresentwicklung_ohne_winter AS
+SELECT d.basis, d.jahr, d.tag_typ,
+	avg(d.dtv_rel)*100 AS dtv_rel, std(d.dtv_rel)/sqrt(count(d.dtv_rel))*100 as dtv_rel_2stddev
+FROM nast_monatsvergleich d
+WHERE d.monat>=4 AND d.monat<=9
+GROUP BY d.basis, d.jahr, d.tag_typ;
+
+CREATE OR REPLACE VIEW nast_jahresentwicklung_winter AS
+SELECT d.basis, d.jahr, d.tag_typ,
+avg(d.dtv_rel)*100 AS dtv_rel, std(d.dtv_rel)/sqrt(count(d.dtv_rel))*100 as dtv_rel_2stddev
+FROM nast_monatsvergleich d
+WHERE d.monat<=4 OR d.monat>=9
+GROUP BY d.basis, d.jahr, d.tag_typ;
+
+UPDATE nast_monatsdtv d INNER JOIN nast_jahresdtv j USING(jahr, stelle_id)
+SET d.dtv_rel = d.dtv/j.dtv_tag;
 
 """)

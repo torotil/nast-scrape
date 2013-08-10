@@ -9,7 +9,7 @@ class Harvester(NastHarvester):
 	def getPage(self, stelle):
 		jahre  = '-'.join([str(x) for x in range(2002,2013)])
 		monate = '-'.join([str(x) for x in range(1,13)])
-		url    = '/charts/test_php/read_jahresDTV_from_DB.php?get_variable=%d--%s--%s--%%d' % (stelle, jahre, monate)
+		url    = '/charts/read_chart/data_entwicklung.php?get_variable=%d--%s--%s--%%d' % (stelle, jahre, monate)
 		data   = []
 		for typ in range(3):
 			# for some reason the first character in the response is corrupted
@@ -28,7 +28,7 @@ class Extractor:
 					dataset.append({
 						'stelle':  page['stelle'],
 						'jahr':    jahr,
-						'monat':   monat+5 if page['stelle'] == 9 and jahr == 2012 else monat,
+						'monat':   monat,
 						'tag_typ': typ,
 						'dtv':     dtv,
 					})
@@ -51,7 +51,7 @@ data  = []
 harvester = Harvester()
 extractor = Extractor()
 
-for stelle in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]:
+for stelle in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
 			datasets.put({'stelle': stelle})
 datasets.put(None)
 			
