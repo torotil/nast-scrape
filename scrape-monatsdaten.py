@@ -7,7 +7,7 @@ from scrape import TextResponseWrapper, NastHarvester, Itemizer, Storer, Consume
 
 class Harvester(NastHarvester):
 	def getPage(self, stelle):
-		jahre  = '-'.join([str(x) for x in range(2002,2013)])
+		jahre  = '-'.join([str(x) for x in range(2002,2014)])
 		monate = '-'.join([str(x) for x in range(1,13)])
 		url    = '/charts/read_chart/data_entwicklung.php?get_variable=%d--%s--%s--%%d' % (stelle, jahre, monate)
 		data   = []
@@ -23,7 +23,7 @@ class Extractor:
 		for typ in range(3):
 			data = json.loads(page['data'][typ])
 			values = [x['values'] for x in data['elements'] if 'values' in x]
-			for jahr, dtv_months in zip(range(2002,2013), values):
+			for jahr, dtv_months in zip(range(2002,2014), values):
 				for monat, dtv in zip(range(1,13), dtv_months[:-1]):
 					dataset.append({
 						'stelle':  page['stelle'],

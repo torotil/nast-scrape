@@ -101,6 +101,9 @@ for d in data:
 
 print("""
 
+DELETE FROM nast_tagesdtv WHERE dtv_summe=0;
+DELETE FROM nast_monatsdtv WHERE dtv=0;
+
 DROP TABLE IF EXISTS nast_zaehlstellen;
 
 CREATE TABLE nast_zaehlstellen (
