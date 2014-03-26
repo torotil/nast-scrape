@@ -1,5 +1,7 @@
 import pickle
 import json
+import time
+import nast
 
 from queue import Queue
 
@@ -7,24 +9,45 @@ from scrape import TextResponseWrapper, NastHarvester, Itemizer, Storer, Consume
 
 class Harvester(NastHarvester):
 	def getPage(self, stelle):
-		jahre  = '-'.join([str(x) for x in range(2002,2014)])
-		monate = '-'.join([str(x) for x in range(1,13)])
-		url    = '/charts/read_chart/data_entwicklung.php?get_variable=%d--%s--%s--%%d' % (stelle, jahre, monate)
-		data   = []
-		for typ in range(3):
-			# for some reason the first character in the response is corrupted
-			data.append(self.fetch(url % (typ, )).read())
-		return {'data': data, 'stelle': stelle}
+		args = {}
+		for year in range(2002, 2014):
+			args['year_%s' % year] = 'Y'
+		for month in range(1, 13):
+			args['month_%s' % month] = 'Y'
+		
+		url = '/charts/entwicklung/%s?ajax=change_entwicklung' % (stelle)
+		time.sleep(0.5)
+
+		ret = []
+		for d in ['wt', 'sa', 'sof']:
+			args['option_dtv'] = d
+			data = self.fetch(url, args).read()
+			try:
+				data = json.loads(data)
+			except ValueError:
+				print("Failure for item %s" % item)
+				continue
+			data = data['jscall'][0]
+			data = json.loads(data[data.find('((')+2:-len(').val)')])['val']
+			data = data.replace("\r", '').replace('\t', '').split("\n")
+			all_data = []
+			for line in data:
+				if line.startswith('chart_data'):
+					all_data = json.loads(line[line.find('[['):-1])
+			ret.append(all_data)
+		return {'data': ret, 'stelle': stelle}
 
 
 class Extractor:
 	def convert(self, page):
 		dataset = []
 		for typ in range(3):
-			data = json.loads(page['data'][typ])
-			values = [x['values'] for x in data['elements'] if 'values' in x]
-			for jahr, dtv_months in zip(range(2002,2014), values):
-				for monat, dtv in zip(range(1,13), dtv_months[:-1]):
+			jahre = [int(x) for x in page['data'][typ][0][1:]]
+			for dtv_years in page['data'][typ][1:]:
+				if dtv_years[0] == 'JAHR':
+					continue
+				monat = nast.monat[dtv_years[0]]
+				for jahr, dtv in zip(jahre, dtv_years[1:]):
 					dataset.append({
 						'stelle':  page['stelle'],
 						'jahr':    jahr,
@@ -51,7 +74,7 @@ data  = []
 harvester = Harvester()
 extractor = Extractor()
 
-for stelle in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+for stelle in nast.stellen:
 			datasets.put({'stelle': stelle})
 datasets.put(None)
 			

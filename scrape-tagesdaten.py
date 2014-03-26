@@ -1,17 +1,45 @@
 import pickle
 import json
+import time
+import nast
 
 from queue import Queue
+from datetime import datetime
 
 from scrape import TextResponseWrapper, NastHarvester, Itemizer, Storer, ConsumerProducer
 
 class Harvester(NastHarvester):
 	def getPage(self, stelle, jahr, monat):
-		url    = '/charts/read_chart/data_monatsauswertung.php?zid=%d&monat=%d&jahr=%d&temp=2&niederschlag=1&summe=1&richtung=1&richtung=1&skala=1' % (stelle, monat, jahr)
-		data   = self.fetch(url).read()
-		#args   = { 'art': 'Monatsauswertung', 'a': stelle, 'b': 2, 'c' : 1, 'monat' : monat, 'jahr' : jahr }
-		#legend = self.fetch('/verkehrsdaten/Legende', args).read()
-		return {'data': data, 'stelle': stelle, 'jahr': jahr, 'monat': monat}
+		url = '/charts/monatsauswertung/%s?ajax=change_monatsauswertung' % (stelle)
+		args = {
+		  'checkbox_bar': '',
+		  'checkbox_detailed_temperature': 'Y',
+		  'checkbox_line': 'Y',
+		  'checkbox_rainfall': 'Y',
+		  'checkbox_simple_temperature': '',
+		  'checkbox_sum': 'Y',
+		  'option_scale': 'dynamic_scale',
+		  'select_date': datetime(jahr, monat, 1).timestamp()
+		}
+		time.sleep(0.5)
+		data = self.fetch(url, args).read()
+		try:
+			data = json.loads(data)
+		except ValueError:
+			print("Failure for item %s" % item)
+			return False
+		data = data['jscall'][0]
+		data = json.loads(data[data.find('((')+2:-len(').val)')])['val']
+		data = data.replace("\r", '').replace('\t', '').split("\n")
+
+		all_data = []
+		snow_data = []
+		for line in data:
+			if line.startswith('chart_data'):
+				all_data = json.loads(line[line.find('[['):-1])
+			if line.startswith('days_with_snow_val'):
+				snow_data = json.loads(line[line.find('(')+1:-len(').val;')])['val']
+		return {'data': all_data, 'snow': snow_data, 'stelle': stelle, 'jahr': jahr, 'monat': monat}
 
 
 class Extractor:
@@ -20,46 +48,31 @@ class Extractor:
 		self.page = 0
 	
 	def convert(self, page):
-		data = json.loads(page['data'][1:].strip())
-		values = [x['values'] for x in data['elements'] if x['type'] != 'shape' and 'values' in x]
-		
-		if len(values) < 5 or len(values) > 6:
-			#print(len(values), page)
-			return []
-		
-		schnee = values.pop() if len(values) >= 6 else []
-		
-		
 		dataset = []
 		d = 1
-		for item in [[j[i] for j in values] for i in range(len(values[0]))]:
-			if len(item) != 5:
-				print(item)
+		snow = page['snow']
+		for item in page['data'][1:]:
+			label, r1, r2, summe, tmin, t7, t19, tmax, regen = item
+			if r1 == 0 and r2 == 0 and summe == 0:
+				d += 1
 				continue
-			r1, r2, summe, regen, temp = item
+			dstr = str(d)
 			dataset.append({
 				'stelle': page['stelle'],
 				'jahr': page['jahr'],
 				'monat': page['monat'],
-				'tag':   d,
+				'tag': d,
 				'zaehlung_r1': r1,
 				'zaehlung_r2': r2,
 				'zaehlung_summe': summe,
-				'regen': regen['top'] if regen != None else 0,
-				'temp_min': temp['low'],
-				'temp_max': temp['high'],
-				'temp_7':   temp['top'],
-				'temp_19':  temp['bottom'],
-				'schnee': 0,
+				'regen': regen,
+				'temp_min': tmin,
+				'temp_max': tmax,
+				'temp_7':   t7,
+				'temp_19':  t19,
+				'schnee': snow[dstr] if dstr in snow else 0,
 			})
 			d += 1
-		
-		for s in schnee:
-			try:
-				dataset[int(s['x'])]['schnee'] = int(s['tip'].split(' ')[1])
-			except ValueError:
-				pass
-				#print(s['tip'])
 		
 		return dataset
 	
@@ -69,8 +82,9 @@ class Fetcher(ConsumerProducer):
 		self.harvester = harvester
 	def produce(self, item):
 		page = harvester.getPage(item['stelle'], item['jahr'], item['monat'])
-		self.p.put(page)
-		print ("fetched page", item)
+		if page:
+			self.p.put(page)
+			print ("fetched page", item)
 
 datasets = Queue()
 pages = Queue()
@@ -80,12 +94,12 @@ data  = []
 harvester = Harvester()
 extractor = Extractor()
 
-for stelle in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+for stelle in nast.stellen:
 	for monat in range(1, 13):
 		for jahr in [2011, 2012, 2013]:
 			datasets.put({'stelle': stelle, 'jahr': jahr, 'monat': monat})
 datasets.put(None)
-			
+
 fetcher  = Fetcher(datasets, pages, harvester)
 itemizer = Itemizer(pages, items, extractor)
 storer   = Storer(items, data)

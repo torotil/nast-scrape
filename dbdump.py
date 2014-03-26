@@ -44,7 +44,7 @@ DROP TABLE IF EXISTS nast_tagesdtv;
 
 CREATE TABLE nast_tagesdtv (
 	datum  DATE NOT NULL,
-	stelle_id TINYINT,
+	stelle_id VARCHAR(128),
 	dtv_r1 INT,
 	dtv_r2 INT,
 	dtv_summe INT,
@@ -57,9 +57,9 @@ witterung = []
 data = pickle.load(open('tagesdaten.pickle', 'rb'))
 for d in data:
 	datum = date(int(d['jahr']), int(d['monat']), int(d['tag']))
-	print("INSERT INTO nast_tagesdtv VALUES ('%s', %d, %d, %d, %d);"
+	print("INSERT INTO nast_tagesdtv VALUES ('%s', '%s', %d, %d, %d);"
 	      % (datum, d['stelle'], d['zaehlung_r1'], d['zaehlung_r2'], d['zaehlung_summe']))
-	if d['stelle'] == 0:
+	if d['stelle'] == 'argentinierstrasse':
 		witterung.append((datum, d['regen'], d['schnee'], d['temp_min'], d['temp_max'], d['temp_7'], d['temp_19']))
 
 print("""
@@ -86,7 +86,7 @@ DROP TABLE IF EXISTS nast_monatsdtv;
 CREATE TABLE nast_monatsdtv (
 	jahr INT NOT NULL,
 	monat INT NOT NULL,
-	stelle_id TINYINT,
+	stelle_id VARCHAR(128),
 	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag'),
 	dtv INT,
 	dtv_rel DECIMAL(8,5) DEFAULT NULL,
@@ -96,8 +96,8 @@ CREATE TABLE nast_monatsdtv (
 data = pickle.load(open('monatsdaten.pickle', 'rb'))
 for d in data:
 	datum = date(d['jahr'], d['monat'], 1)
-	print("INSERT INTO nast_monatsdtv VALUES (%d, %d, %d, %d, %d, NULL);"
-	       % (d['jahr'], d['monat'], d['stelle'],d['tag_typ']+1, d['dtv']))
+	print("INSERT INTO nast_monatsdtv VALUES (%d, %d, '%s', %d, %d, NULL);"
+	       % (d['jahr'], d['monat'], d['stelle'], d['tag_typ']+1, d['dtv']))
 
 print("""
 
@@ -107,25 +107,25 @@ DELETE FROM nast_monatsdtv WHERE dtv=0;
 DROP TABLE IF EXISTS nast_zaehlstellen;
 
 CREATE TABLE nast_zaehlstellen (
-	id TINYINT PRIMARY KEY,
+	id VARCHAR(128) PRIMARY KEY,
 	name VARCHAR(255),
 	r1 VARCHAR(255),
 	r2 VARCHAR(255)
 );
 
 INSERT INTO nast_zaehlstellen VALUES
-(7, 'Argentinierstraße', 'Zentrum',       'Südbahnhof'),
-(4, 'Donaukanal',        'Zentrum',       'Klosterneuburg'),
-(6, 'Langobardenstraße', 'Stadlau',       'Aspern'),
-(3, 'Lassallestraße',    'Praterstern',   'Reichsbrücke'),
-(5, 'Liesingbach',       'Inzersdorf',    'Atzgersdorf'),
-(0, 'Westbahnhof',       'Burggasse',     'Mariahilferstraße'),
-(2, 'Opernring Innen',   'Parlament',     'Oper'),
-(8, 'Opernring Außen',   'Parlament',     'Oper'),
-(1, 'Wienzeile',         'Stadtauswärts', 'Zentrum'),
-(9, 'Margaritensteg',    'Richtung 1',    'Richtung 2'),
-(11, 'Operngasse', 'Zentrum', 'Stadtauswärts'),
-(12, 'Praterstern', 'Stadtauswärts', 'Zentrum');
+('argentinierstrasse', 'Argentinierstraße', 'Zentrum',       'Südbahnhof'),
+('donaukanal',         'Donaukanal',        'Zentrum',       'Klosterneuburg'),
+('langobardenstrasse', 'Langobardenstraße', 'Stadlau',       'Aspern'),
+('lassallestrasse',    'Lassallestraße',    'Praterstern',   'Reichsbrücke'),
+('liesingbach',        'Liesingbach',       'Inzersdorf',    'Atzgersdorf'),
+('neubaugurtel',       'Neubaugürtel',      'Burggasse',     'Mariahilferstraße'),
+('opernringinnen',     'Opernring Innen',   'Parlament',     'Oper'),
+('opernringaussen',    'Opernring Außen',   'Parlament',     'Oper'),
+('wienzeile',          'Wienzeile',         'Stadtauswärts', 'Zentrum'),
+('margaritensteg',     'Margaritensteg',    'Richtung 1',    'Richtung 2'),
+('operngasse',         'Operngasse',        'Zentrum',       'Stadtauswärts'),
+('praterstern',        'Praterstern',       'Stadtauswärts', 'Zentrum');
 
 
 --- Nützliche Views und Tables
@@ -157,7 +157,7 @@ CREATE TABLE nast_monatsvergleich (
 	basis VARCHAR(32),
 	jahr INT NOT NULL,
 	monat INT NOT NULL,
-	stelle_id TINYINT,
+	stelle_id VARCHAR(128),
 	tag_typ ENUM('mo-fr', 'sa', 'so&feiertag', 'werktag'),
 	dtv INT,
 	dtv_basis INT,
@@ -177,7 +177,7 @@ UPDATE
 	INNER JOIN nast_monatsdtv b ON a.jahr=b.jahr AND a.monat=b.monat AND a.tag_typ=b.tag_typ
 SET
 	a.dtv=a.dtv+b.dtv, a.dtv_rel = (a.dtv+b.dtv)/(a.dtv_basis)-1
-WHERE a.stelle_id=2 AND b.stelle_id=8 AND ((a.jahr=2012 AND a.basis='vorjahr') OR (a.jahr>=2012 AND a.basis='2011'));
+WHERE a.stelle_id='opernringinnen' AND b.stelle_id='opernringaussen' AND ((a.jahr=2012 AND a.basis='vorjahr') OR (a.jahr>=2012 AND a.basis='2011'));
 
 CREATE OR REPLACE VIEW nast_monatsentwicklung AS
 SELECT basis, jahr, monat, tag_typ, avg(dtv_rel)*100 AS dtv_rel, 2*std(dtv_rel)/sqrt(count(dtv_rel))*100 AS twostdev
@@ -208,9 +208,9 @@ GROUP BY d.basis, d.jahr, quartal, d.tag_typ;
 
 -- Jahresdaten
 CREATE OR REPLACE VIEW nast_jahresdtv AS
-SELECT d.jahr, d.stelle_id, avg(d.dtv) AS dtv_monat, std(d.dtv)/sqrt(count(d.dtv)) as dtv_monat_2stddev, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag
+SELECT d.jahr, d.tag_typ, d.stelle_id, avg(d.dtv) AS dtv_monat, std(d.dtv)/sqrt(count(d.dtv)) as dtv_monat_2stddev, sum(d.dtv*t.tage)/sum(t.tage) AS dtv_tag
 FROM nast_monatsdtv d INNER JOIN tage_tagepromonatundtyp t ON d.jahr=t.jahr AND d.monat=t.monat AND d.tag_typ=t.typ
-GROUP BY d.jahr, d.stelle_id;
+GROUP BY d.jahr, d.stelle_id, d.tag_typ;
 
 CREATE OR REPLACE VIEW nast_jahresvergleich AS
 SELECT d.basis, d.jahr, d.stelle_id, d.tag_typ,
